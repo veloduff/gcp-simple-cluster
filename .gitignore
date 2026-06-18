@@ -598,11 +598,11 @@ reports/
 
 .cluster-keys/
 ansible/inventory.ini
-.terraform/
-terraform.tfstate
-terraform.tfstate.backup
-.terraform.lock.hcl
-terraform.tfvars
+**/.terraform/
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/.terraform.lock.hcl
+**/terraform.tfvars
 
 
 
