@@ -1,0 +1,221 @@
+---
+- name: 1. Setup Environment Facts & Prerequisites
+  hosts: all_nodes
+  become: true
+  tags: [always]
+  tasks:
+    - name: Enable EPEL Repository (RedHat family)
+      ansible.builtin.dnf:
+        name: epel-release
+        state: present
+      when: ansible_os_family == 'RedHat'
+
+- name: 2. Install Compilers and HPC Software
+  hosts: all_nodes
+  become: true
+  tags: [compilers]
+  tasks:
+    - name: Set compiler package list (RedHat family)
+      ansible.builtin.set_fact:
+        compiler_packages: ['git', 'make', 'gcc', 'gcc-c++', 'gcc-gfortran', 'openmpi', 'openmpi-devel']
+      when: ansible_os_family == 'RedHat'
+
+    - name: Set compiler package list (Debian family)
+      ansible.builtin.set_fact:
+        compiler_packages: ['git', 'make', 'gcc', 'g++', 'gfortran', 'openmpi-bin', 'libopenmpi-dev']
+      when: ansible_os_family == 'Debian'
+
+    - name: Install compilers and MPI
+      ansible.builtin.package:
+        name: "{{ compiler_packages }}"
+        state: present
+
+- name: 3. Install NFS Packages
+  hosts: all_nodes
+  become: true
+  tags: [nfs]
+  tasks:
+    - name: Install NFS package (RedHat family)
+      ansible.builtin.package:
+        name: ['nfs-utils']
+        state: present
+      when: ansible_os_family == 'RedHat'
+
+    - name: Install NFS package (Debian family)
+      ansible.builtin.package:
+        name: ['nfs-common']
+        state: present
+      when: ansible_os_family == 'Debian'
+
+- name: 4. Configure NFS Server on Master Node
+  hosts: master
+  become: true
+  tags: [nfs]
+  vars:
+    shared_dir: /home/hpcuser/shared
+  tasks:
+    - name: Ensure shared directory exists
+      ansible.builtin.file:
+        path: "{{ shared_dir }}"
+        state: directory
+        owner: hpcuser
+        group: hpcuser
+        mode: '0755'
+
+    - name: Configure NFS Export
+      ansible.builtin.lineinfile:
+        path: /etc/exports
+        line: "{{ shared_dir }} 10.10.0.0/24(rw,sync,no_subtree_check,no_root_squash)"
+        create: true
+        mode: '0644'
+
+    - name: Start and enable NFS services (RedHat family)
+      ansible.builtin.systemd:
+        name: nfs-server
+        state: restarted
+        enabled: true
+      when: ansible_os_family == 'RedHat'
+
+    - name: Start and enable NFS services (Debian family)
+      ansible.builtin.systemd:
+        name: nfs-kernel-server
+        state: restarted
+        enabled: true
+      when: ansible_os_family == 'Debian'
+
+- name: 5. Configure NFS Client on Compute Nodes
+  hosts: compute
+  become: true
+  tags: [nfs]
+  vars:
+    shared_dir: /home/hpcuser/shared
+  tasks:
+    - name: Ensure mount directory exists
+      ansible.builtin.file:
+        path: "{{ shared_dir }}"
+        state: directory
+        owner: hpcuser
+        group: hpcuser
+        mode: '0755'
+
+    - name: Mount NFS share from Master
+      ansible.posix.mount:
+        path: "{{ shared_dir }}"
+        src: "{{ hostvars[groups['master'][0]]['ansible_default_ipv4']['address'] }}:{{ shared_dir }}"
+        fstype: nfs
+        opts: defaults,timeo=14,intr
+        state: mounted
+
+- name: 6. Configure Slurm Packages and MUNGE Authentication
+  hosts: all_nodes
+  become: true
+  tags: [slurm]
+  tasks:
+    - name: Install Slurm/MUNGE packages (RedHat family)
+      ansible.builtin.package:
+        name: ['munge', 'slurm', 'slurm-slurmd', 'slurm-slurmctld']
+        state: present
+      when: ansible_os_family == 'RedHat'
+
+    - name: Install Slurm/MUNGE packages (Debian family)
+      ansible.builtin.package:
+        name: ['munge', 'slurmd', 'slurmctld']
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Check if MUNGE key exists on Master
+      ansible.builtin.stat:
+        path: /etc/munge/munge.key
+      register: munge_key_stat
+      run_once: true
+      delegate_to: "{{ groups['master'][0] }}"
+
+    - name: Generate MUNGE key on Master if not present
+      ansible.builtin.command: dd if=/dev/urandom of=/etc/munge/munge.key bs=1 count=1024
+      run_once: true
+      delegate_to: "{{ groups['master'][0] }}"
+      when: not munge_key_stat.stat.exists
+
+    - name: Set correct permissions on Master MUNGE key
+      ansible.builtin.file:
+        path: /etc/munge/munge.key
+        owner: munge
+        group: munge
+        mode: '0400'
+      run_once: true
+      delegate_to: "{{ groups['master'][0] }}"
+
+    - name: Fetch MUNGE key from Master to controller temp
+      ansible.builtin.fetch:
+        src: /etc/munge/munge.key
+        dest: /tmp/munge.key
+        flat: true
+      run_once: true
+      delegate_to: "{{ groups['master'][0] }}"
+
+    - name: Distribute MUNGE key to all nodes
+      ansible.builtin.copy:
+        src: /tmp/munge.key
+        dest: /etc/munge/munge.key
+        owner: munge
+        group: munge
+        mode: '0400'
+
+    - name: Start and enable MUNGE service
+      ansible.builtin.systemd:
+        name: munge
+        state: restarted
+        enabled: true
+
+    - name: Configure Slurm configuration file (slurm.conf)
+      ansible.builtin.blockinfile:
+        path: "{{ '/etc/slurm/slurm.conf' if ansible_os_family == 'RedHat' else '/etc/slurm-wlm/slurm.conf' }}"
+        create: true
+        mode: '0644'
+        block: |
+          ClusterName=hpc-cluster
+          SlurmctldHost={{ hostvars[groups['master'][0]]['ansible_hostname'] }}
+          
+          # Auth
+          AuthType=auth/munge
+          
+          # Directories & Files
+          SlurmdSpoolDir=/var/spool/slurmd
+          SlurmdLogFile=/var/log/slurm/slurmd.log
+          SlurmctldLogFile=/var/log/slurm/slurmctld.log
+          SlurmdPidFile=/var/run/slurmd.pid
+          SlurmctldPidFile=/var/run/slurmctld.pid
+          
+          # Scheduler
+          SchedulerType=sched/backfill
+          SelectType=select/cons_res
+          SelectTypeParameters=CR_Core
+          
+          # Nodes definition
+          {% for host in groups['all_nodes'] %}
+          NodeName={{ hostvars[host]['ansible_hostname'] }} State=UNKNOWN CoresPerSocket=2 ThreadsPerCore=1 RealMemory=3000
+          {% endfor %}
+          
+          # Partition definition
+          PartitionName=debug Nodes={% for host in groups['all_nodes'] %}{{ hostvars[host]['ansible_hostname'] }}{% if not loop.last %},{% endif %}{% endfor %} Default=YES MaxTime=INFINITE State=UP
+
+    - name: Create Log Directory for Slurm
+      ansible.builtin.file:
+        path: /var/log/slurm
+        state: directory
+        owner: slurm
+        group: slurm
+        mode: '0755'
+
+    - name: Start Slurm Controller on Master
+      ansible.builtin.systemd:
+        name: slurmctld
+        state: restarted
+        enabled: true
+      when: inventory_hostname in groups['master']
+
+    - name: Start Slurm Daemon on All Nodes
+      ansible.builtin.systemd:
+        name: slurmd
+        state: restarted
+        enabled: true

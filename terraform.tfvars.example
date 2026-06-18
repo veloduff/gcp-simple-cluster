@@ -1,0 +1,17 @@
+# GCP Project ID where resources will be deployed
+project_id = "your-gcp-project-id"
+
+# Region and zone for the cluster
+region = "us-central1"
+zone   = "us-central1-b"
+
+# Number of cluster nodes (instances)
+cluster_size = 3
+
+# Compute instance settings
+machine_type = "n4d-standard-8"
+image_family = "rocky-linux-8-optimized-gcp"
+image_project = "rocky-linux-cloud"
+
+# Custom name prefix for cluster resources
+cluster_name = "simple-hpc-cluster"
