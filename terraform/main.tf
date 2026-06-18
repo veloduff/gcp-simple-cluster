@@ -91,7 +91,7 @@ resource "google_compute_instance_template" "hpc_template" {
   }
 
   metadata = {
-    startup-script      = file("${path.module}/startup.sh")
+    startup-script      = file("${path.module}/../startup.sh")
     cluster-public-key  = tls_private_key.cluster_ssh_key.public_key_openssh
     cluster-private-key = tls_private_key.cluster_ssh_key.private_key_pem
   }

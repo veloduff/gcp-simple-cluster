@@ -11,7 +11,7 @@ Choose the method that fits your needs:
 ## Shared Architecture
 
 *   **SSH Key Pair**: A single cluster-wide SSH key pair is generated and distributed to all VM instances via metadata.
-*   **Passwordless Setup**: On VM boot, [startup.sh](./startup.sh) retrieves the keys from metadata, saves them to `/home/hpcuser/.ssh/`, and configures `StrictHostKeyChecking no` for the `.internal` zone.
+*   **Passwordless Setup**: On VM boot, [startup.sh](./startup.sh) retrieves the keys from metadata, saves them to `/home/hpcuser/.ssh/`, and configures `StrictHostKeyChecking no` for all hosts.
 *   **Node Discovery**: A utility script `/usr/local/bin/discover-nodes` runs automatically via cron every minute. It queries the GCP Compute API to find all other nodes in the cluster, saving their names to `/home/hpcuser/hostfile` for easy parallel execution (e.g. using MPI).
 
 ---
@@ -52,12 +52,6 @@ This script will:
 *   Create a Compute Instance Template **without public IP addresses** (`--no-address`).
 *   Deploy a Managed Instance Group (MIG) inside your existing VPC/Subnet.
 
-### 4. Cleanup
-To delete the cluster and local key files:
-```bash
-./destroy_cluster.sh
-```
-
 ---
 
 ## Method 2: Terraform (New VPC)
@@ -65,7 +59,7 @@ To delete the cluster and local key files:
 Use this method if you want Terraform to manage everything, including creating a new VPC network, subnets, and firewall rules.
 
 ### 1. Configure variables
-Create a `terraform.tfvars` file (based on [terraform.tfvars.example](./terraform.tfvars.example)) with your settings:
+Create a `terraform.tfvars` file (based on [terraform.tfvars.example](./terraform/terraform.tfvars.example)) with your settings:
 ```hcl
 project_id = "your-gcp-project-id"
 region     = "your-gcp-region"
@@ -75,15 +69,10 @@ cluster_size = 3
 
 ### 2. Initialize and Deploy
 ```bash
+cd terraform
 terraform init
 terraform plan
 terraform apply
-```
-
-### 3. Cleanup
-To destroy all created infrastructure:
-```bash
-terraform destroy
 ```
 
 ---
@@ -185,5 +174,6 @@ To destroy all created resources and avoid further charges:
 
 ### If deployed via Terraform:
 ```bash
+cd terraform
 terraform destroy
 ```
