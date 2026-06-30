@@ -3,8 +3,30 @@
 
 set -euo pipefail
 
-# Configuration sourced from central config file
-source "$(dirname "$0")/config.sh"
+# Configuration sourced dynamically from active Terraform outputs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/terraform"
+
+# Pre-flight GCP Authentication check
+if ! gcloud auth application-default print-access-token >/dev/null 2>&1; then
+  echo "" >&2
+  echo "❌ ERROR: Your Google Cloud Application Default Credentials (ADC) have expired." >&2
+  echo "👉 Please run: gcloud auth application-default login" >&2
+  echo "" >&2
+  exit 1
+fi
+
+if ! terraform state list >/dev/null 2>&1; then
+  echo "ERROR: Terraform state not found. Please run 'terraform apply' first inside the 'terraform/' directory." >&2
+  exit 1
+fi
+
+PROJECT_ID=$(terraform output -raw project_id)
+ZONE=$(terraform output -raw zone)
+CLUSTER_NAME=$(terraform output -raw cluster_name)
+CLUSTER_SIZE=$(terraform output -raw cluster_size)
+
+cd "$SCRIPT_DIR"
 
 echo "Waiting for all ${CLUSTER_SIZE} nodes in '${CLUSTER_NAME}' to be RUNNING with internal IPs..."
 
@@ -13,7 +35,7 @@ ATTEMPT=0
 while true; do
   instances=$(gcloud compute instances list \
     --project="${PROJECT_ID}" \
-    --filter="name ~ '^${CLUSTER_NAME}-node-.*'" \
+    --filter="name ~ '^${CLUSTER_NAME}-(master|node-.*)'" \
     --format="value(name, networkInterfaces[0].networkIP, status)" || true)
 
   count=0
@@ -43,7 +65,7 @@ while true; do
     if [ "$ready_count" -gt 0 ]; then
       echo "WARNING: Timeout waiting for all nodes to become ready."
       echo "Only ${ready_count} out of ${CLUSTER_SIZE} nodes are running."
-      echo "Proceeding with the ${ready_count} active nodes..."
+      echo "Proceeding with the active nodes..."
       break
     else
       echo "ERROR: Timeout waiting for nodes to become ready. No active nodes found."
@@ -57,16 +79,14 @@ done
 
 master_nodes=""
 compute_nodes=""
-first=true
 
 # Parse instances names for the inventory (only include nodes that are RUNNING)
 while read -r name ip status; do
   if [ -z "$name" ] || [ "$status" != "RUNNING" ]; then
     continue
   fi
-  if [ "$first" = true ]; then
+  if [[ "$name" =~ -master$ ]]; then
     master_nodes="$name"
-    first=false
   else
     compute_nodes="${compute_nodes:+${compute_nodes}
 }${name}"
@@ -89,7 +109,8 @@ compute
 [all_nodes:vars]
 ansible_user=hpcuser
 ansible_ssh_private_key_file=../.cluster-keys/id_rsa_cluster
-ansible_ssh_common_args='-o ProxyCommand="gcloud compute start-iap-tunnel %h %p --listen-on-port=0 --project=${PROJECT_ID} --zone=${ZONE} --quiet" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+ansible_python_interpreter=/usr/bin/python3.9
+ansible_ssh_common_args='-o ProxyCommand="gcloud compute start-iap-tunnel %h %p --listen-on-stdin --project=${PROJECT_ID} --zone=${ZONE} --quiet" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
 EOF
 
 echo "--------------------------------------------------"

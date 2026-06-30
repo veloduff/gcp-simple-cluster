@@ -1,10 +1,13 @@
-# Simple GCP HPC-Like Cluster using MIG
+# Simple GCP HPC-Like Cluster using Terraform & Ansible
 
-This project provides two methods to deploy a Managed Instance Group (MIG) on GCP with pre-configured passwordless SSH and automated peer node discovery.
+This project provides a clean workflow to deploy and configure a Managed Instance Group (MIG) on GCP as an HPC-like cluster. 
 
-Choose the method that fits your needs:
-1. **Command Line / `gcloud` (Recommended for existing VPC/Subnet)**: Simple and direct scripts.
-2. **Terraform**: Best for provisioning a dedicated VPC, subnet, firewall rules, and cluster nodes all in one go.
+The deployment follows a two-tier automation strategy:
+
+| Tool | Category | Primary Focus | Best At... |
+| :--- | :--- | :--- | :--- |
+| **Terraform** | Infrastructure as Code (IaC) | Provisioning ("The Hardware") | Creating VPC networks, subnets, firewalls, GCE Instance Templates, MIGs, Service Accounts, and Cloud NAT. |
+| **Ansible** | Configuration Management (CM) | Configuration ("The Software") | Setting up the OS, installing compilers, configuring users, setting up NFS exports/mounts, starting Slurm services, and orchestrating multi-node actions. |
 
 ---
 
@@ -16,75 +19,87 @@ Choose the method that fits your needs:
 
 ---
 
-## Method 1: Command Line / `gcloud` (Existing VPC)
+## Workflow Step 1: Provision Infrastructure via Terraform
 
-Use this method to quickly deploy the cluster using an existing VPC and subnet.
+Use this method to deploy a dedicated VPC network, subnets, firewall rules, Cloud NAT (required for package installations on private instances), and cluster nodes.
 
-### 1. Configure the Variables
-All CLI and Ansible scripts read from a single configuration file. Open [config.sh](./config.sh) and configure your project ID, VPC, subnet, and region/zone preferences.
+### Terraform Basics (For Beginners)
 
-Alternatively, you can export them directly in your shell session:
-```bash
-export PROJECT_ID="your-gcp-project-id"
-export VPC_NAME="your-vpc-name"
-export SUBNET_NAME="your-subnet-name"
-export ZONE="your-gcp-zone"
-```
+If you are new to Terraform, here is a quick overview of how it works:
 
-### 2. Ensure IAP SSH Firewall Rule Exists
-Because instances are created without public external IPs (for security and policy compliance), your Mac connects to them using GCP Identity-Aware Proxy (IAP) SSH tunneling.
-You must ensure your existing VPC allows ingress TCP traffic on port 22 from the GCP IAP ip range `35.235.240.0/20`. If this rule doesn't exist, create it:
-```bash
-gcloud compute firewall-rules create allow-ssh-from-iap \
-    --network="your-vpc-name" \
-    --allow=tcp:22 \
-    --source-ranges=35.235.240.0/20 \
-    --project="your-gcp-project-id"
-```
+#### The 4 Core Commands
+*   **`terraform init`**: Initializes the workspace by downloading the Google Cloud provider plugins required to talk to GCP APIs. Run this once when setting up.
+*   **`terraform plan`**: Performs a dry run, showing you exactly what resources it wants to create, modify, or delete without making any real changes. Safe to run at any time.
+*   **`terraform apply`**: Executes the changes in GCP, provisioning the actual cloud resources. It will ask for confirmation (`yes`) before running.
+*   **`terraform destroy`**: Tears down and deletes every resource managed by this configuration. Run this when you are finished testing to avoid cloud charges.
 
-### 3. Deploy the Cluster
-Run the deployment script:
-```bash
-./deploy_cluster.sh
-```
-This script will:
-*   Generate SSH keys locally under `.cluster-keys/` directory (`id_rsa_cluster` and `id_rsa_cluster.pub`).
-*   Create a Compute Instance Template **without public IP addresses** (`--no-address`).
-*   Deploy a Managed Instance Group (MIG) inside your existing VPC/Subnet.
+#### Core Configuration Files
+*   **`main.tf`**: The infrastructure blueprint describing the resources to build (VPC, VMs, firewalls).
+*   **`variables.tf`**: Input definitions that allow customizing parameters like project ID, zones, and cluster sizes.
+*   **`outputs.tf`**: Values printed at the end of a successful run (like instance names and SSH commands).
+*   **`cluster.conf`**: Your local parameter settings file (copied from `cluster.conf.example` in the root directory).
+
+#### The State File (`terraform.tfstate`)
+Once deployed, Terraform creates a local state file to track your live resources. **Never edit this file manually.** If deleted or modified, Terraform loses track of your infrastructure.
 
 ---
 
-## Method 2: Terraform (New VPC)
-
-Use this method if you want Terraform to manage everything, including creating a new VPC network, subnets, and firewall rules.
+### Deployment Steps
 
 ### 1. Configure variables
-Create a `terraform.tfvars` file (based on [terraform.tfvars.example](./terraform/terraform.tfvars.example)) with your settings:
+Create a `cluster.conf` file (based on [cluster.conf.example](./cluster.conf.example)) in the root directory:
 ```hcl
 project_id = "your-gcp-project-id"
 region     = "your-gcp-region"
 zone       = "your-gcp-zone"
-cluster_size = 3
+
+# Total compute nodes (excluding the master node)
+compute_node_count = 2
+master_machine_type = "n4-standard-4"
+compute_machine_type = "c4-standard-8"
+
+# VPC Toggles: Set to false to deploy inside an existing VPC
+create_network = true
+vpc_name       = "default"
+subnet_name    = "default"
 ```
 
-### 2. Initialize and Deploy
+### 2. Verify settings and GCP Auth
+From the root directory, check your configuration parameters and GCP authentication status:
 ```bash
-cd terraform
-terraform init
-terraform plan
-terraform apply
+./simple-cluster.sh check-config
+```
+
+### 3. Launch the Cluster
+Run the unified launch command. This will initialize and apply Terraform to deploy the VMs, and then automatically configure the shared NFS folders, build tools, and the Slurm workload scheduler:
+```bash
+./simple-cluster.sh launch
+```
+
+---
+
+## Post-Deployment Configurations (Ansible)
+
+If you need to re-run or update the software configurations (NFS, compilers, or Slurm) at any time on the running cluster without rebuilding it, run the `configure` subcommand:
+
+```bash
+# Re-run all playbook configurations (interactive menu)
+./simple-cluster.sh configure
+
+# Non-interactive CLI flag example (configure compilers & NFS only)
+./simple-cluster.sh configure --compilers --nfs
 ```
 
 ---
 
 ## Testing & Verifying the Cluster
 
-Once deployed (using either method):
+Once configured:
 
-1. **SSH into a Cluster Node**:
-   Run the `gcloud compute ssh` command printed at the end of the deployment script or Terraform outputs. E.g.:
+1. **SSH into the Master Node**:
+   Run the `gcloud compute ssh` command printed at the end of the deployment. E.g.:
    ```bash
-   gcloud compute ssh simple-hpc-cluster-node-xxxx --zone=your-gcp-zone
+   gcloud compute ssh simple-hpc-cluster-master --project=your-gcp-project --zone=your-gcp-zone
    ```
 
 2. **Switch to the Cluster User**:
@@ -93,7 +108,7 @@ Once deployed (using either method):
    ```
 
 3. **Verify Node Discovery**:
-   Wait a minute for the cron job to run, then check the discovered nodes:
+   Check the autodiscovered nodes file:
    ```bash
    cat ~/hostfile
    ```
@@ -114,66 +129,22 @@ Once deployed (using either method):
    pdsh "uptime && free -h"
    ```
 
-6. **Alternative: Run a Parallel Loop Command**:
-   If you prefer a standard bash loop:
+6. **Verify Slurm State**:
+   If Slurm was installed, check partition status and run a test job across all nodes:
    ```bash
-   for node in $(cat ~/hostfile); do ssh $node "echo -n '$node says hello from '; hostname"; done
+   # View partition status and available nodes
+   sinfo
+
+   # Run a test job across all nodes in the cluster
+   srun -N 3 hostname
    ```
-
----
-
-## Optional: Configuring NFS & Slurm via Ansible
-
-After launching your basic cluster, you can optionally configure it with a shared **NFS folder** (mounted at `/home/hpcuser/shared` across all nodes) and the **Slurm Workload Manager** scheduler.
-
-### 1. Run the Configuration Script
-From the workspace root directory on your **Mac**, run the interactive configuration script:
-```bash
-./configure_cluster.sh
-```
-This will automatically call the dynamic inventory script and prompt you to enable/disable:
-*   **Compilers**: `gcc`, `make`, `git`, and OpenMPI library setup.
-*   **NFS**: A shared network filesystem directory at `/home/hpcuser/shared` mounted on all nodes.
-*   **Slurm**: MUNGE authentication and the Slurm workload scheduler.
-
-Alternatively, you can run configuration non-interactively using CLI flags:
-```bash
-# Configure everything
-./configure_cluster.sh --all
-
-# Configure only NFS and Compilers (skip Slurm)
-./configure_cluster.sh --nfs --compilers
-```
-This runs the pre-configured [site.yml](./ansible/site.yml) playbook, which automatically:
-*   Installs dependencies (compilers, git, make, OpenMPI) on all nodes.
-*   Configures the master node as an NFS server, sharing `/home/hpcuser/shared` with all nodes in the subnet.
-*   Mounts the NFS directory on all compute nodes.
-*   Configures MUNGE authentication and starts it on all nodes.
-*   Generates a dynamic `slurm.conf` listing all discovered compute nodes, and starts `slurmctld` (controller) on the master and `slurmd` (daemons) on compute nodes.
-
-### 2. Verify Slurm
-Once the playbook completes, you can check the state of the Slurm cluster:
-```bash
-# View partition status and available nodes
-sinfo
-
-# Run a test job across all nodes in the cluster
-srun -N 3 hostname
-```
 
 ---
 
 ## Cleanup
 
-To destroy all created resources and avoid further charges:
+To destroy all created resources and avoid further charges, run the unified destroy command:
 
-### If deployed via CLI:
 ```bash
-./destroy_cluster.sh
-```
-
-### If deployed via Terraform:
-```bash
-cd terraform
-terraform destroy
+./simple-cluster.sh destroy
 ```
