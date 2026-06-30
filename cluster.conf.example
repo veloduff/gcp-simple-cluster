@@ -1,0 +1,23 @@
+# GCP Project ID where resources will be deployed
+project_id = "your-gcp-project-id"
+
+# Region and zone for the cluster
+region = "us-central1"
+zone   = "us-central1-b"
+
+# Number of compute nodes (excluding the master node)
+compute_node_count = 2
+
+# Compute instance settings
+master_machine_type  = "n4-standard-4"
+compute_machine_type = "c4-standard-8"
+image_family         = "rocky-linux-8-optimized-gcp"
+image_project        = "rocky-linux-cloud"
+
+# Custom name prefix for cluster resources
+cluster_name = "simple-hpc-cluster"
+
+# VPC Toggle configuration: Set create_network = false to deploy in an existing network
+create_network = true
+vpc_name       = "default"
+subnet_name    = "default"

@@ -603,6 +603,7 @@ ansible/inventory.ini
 **/terraform.tfstate.backup
 **/.terraform.lock.hcl
 **/terraform.tfvars
+cluster.conf
 
 
 

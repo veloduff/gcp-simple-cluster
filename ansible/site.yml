@@ -63,10 +63,9 @@
         mode: '0755'
 
     - name: Configure NFS Export
-      ansible.builtin.lineinfile:
-        path: /etc/exports
-        line: "{{ shared_dir }} 10.10.0.0/24(rw,sync,no_subtree_check,no_root_squash)"
-        create: true
+      ansible.builtin.template:
+        src: exports.j2
+        dest: /etc/exports
         mode: '0644'
 
     - name: Start and enable NFS services (RedHat family)

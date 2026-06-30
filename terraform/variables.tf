@@ -15,22 +15,46 @@ variable "zone" {
   default     = "us-central1-b"
 }
 
+variable "create_network" {
+  description = "Whether to create a new VPC network and subnet. If false, vpc_name and subnet_name must be provided."
+  type        = bool
+  default     = true
+}
+
+variable "vpc_name" {
+  description = "The name of the VPC network (used if create_network is false)."
+  type        = string
+  default     = "default"
+}
+
+variable "subnet_name" {
+  description = "The name of the Subnet (used if create_network is false)."
+  type        = string
+  default     = "default"
+}
+
 variable "cluster_name" {
   description = "Prefix name for all resources in the cluster."
   type        = string
   default     = "simple-hpc-cluster"
 }
 
-variable "cluster_size" {
-  description = "Number of instances (nodes) in the cluster."
+variable "compute_node_count" {
+  description = "Number of compute/worker instances (nodes) in the cluster."
   type        = number
-  default     = 3
+  default     = 2
 }
 
-variable "machine_type" {
-  description = "Machine type for the cluster instances."
+variable "master_machine_type" {
+  description = "Machine type for the master node (typically smaller)."
   type        = string
-  default     = "n4d-standard-8"
+  default     = "n4-standard-4"
+}
+
+variable "compute_machine_type" {
+  description = "Machine type for the compute nodes (typically larger)."
+  type        = string
+  default     = "c4-standard-8"
 }
 
 variable "image_project" {

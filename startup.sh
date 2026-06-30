@@ -25,14 +25,18 @@ if [ -f /etc/debian_version ]; then
 elif [ -f /etc/redhat-release ]; then
   # Rocky Linux / CentOS / RHEL
   dnf install -y epel-release
-  dnf install -y pdsh pdsh-rcmd-ssh curl nfs-utils screen tmux python3-pip
+  dnf install -y pdsh pdsh-rcmd-ssh curl nfs-utils screen tmux python39 python39-pip
 else
   echo "Unsupported OS family. Package installation skipped."
 fi
 
 # 2. Upgrade PyYAML (required by SPECstorage SM2020 tool to support FullLoader)
 echo "Upgrading PyYAML..."
-pip3 install --upgrade PyYAML
+if command -v pip3.9 >/dev/null 2>&1; then
+  pip3.9 install --upgrade PyYAML
+else
+  pip3 install --upgrade PyYAML
+fi
 
 # 3. Create the cluster user if they don't exist
 if ! id -u "${CLUSTER_USER}" >/dev/null 2>&1; then
