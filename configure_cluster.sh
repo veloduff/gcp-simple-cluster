@@ -111,4 +111,4 @@ echo "Running Ansible Playbook with tags: [$TAGS]..."
 echo "------------------------------------------------------------"
 
 cd ansible
-ansible-playbook site.yml --tags "$TAGS"
+ANSIBLE_STDOUT_CALLBACK=unixy ansible-playbook site.yml --tags "$TAGS" | python3 -u "$SCRIPT_DIR/ansible_filter.py"

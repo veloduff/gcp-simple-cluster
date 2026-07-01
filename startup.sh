@@ -102,13 +102,13 @@ cat << 'EOF' > /usr/local/bin/discover-nodes
 # Query the local metadata server and GCP API to find other nodes in this cluster.
 ZONE=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/zone | awk -F/ '{print $4}')
 HOSTNAME=$(hostname)
-PREFIX=$(echo "$HOSTNAME" | sed -E 's/-[a-z0-9]+$//')
+PREFIX=$(echo "$HOSTNAME" | sed -E 's/-(master|node-[a-z0-9]+)$//')
 
 echo "Discovering cluster nodes with prefix '$PREFIX' in zone '$ZONE'..."
 
 # Fetch node list using gcloud (available on GCP Linux images by default)
 gcloud compute instances list \
-  --filter="name ~ '^${PREFIX}-[a-z0-9]+$' AND zone:($ZONE)" \
+  --filter="name ~ '^${PREFIX}-' AND zone:($ZONE)" \
   --format="value(name)" > /home/hpcuser/hostfile.tmp 2>/dev/null
 
 if [ -s /home/hpcuser/hostfile.tmp ]; then
