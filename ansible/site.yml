@@ -100,7 +100,7 @@
     - name: Mount NFS share from Master
       ansible.posix.mount:
         path: "{{ shared_dir }}"
-        src: "{{ hostvars[groups['master'][0]]['ansible_default_ipv4']['address'] }}:{{ shared_dir }}"
+        src: "{{ groups['master'][0] }}:{{ shared_dir }}"
         fstype: nfs
         opts: defaults,timeo=14,intr
         state: mounted
@@ -110,10 +110,25 @@
   become: true
   tags: [slurm]
   tasks:
+    - name: Ensure slurm group exists
+      ansible.builtin.group:
+        name: slurm
+        state: present
+        system: true
+
+    - name: Ensure slurm user exists
+      ansible.builtin.user:
+        name: slurm
+        group: slurm
+        state: present
+        system: true
+        shell: /sbin/nologin
+        create_home: false
     - name: Install Slurm/MUNGE packages (RedHat family)
-      ansible.builtin.package:
+      ansible.builtin.dnf:
         name: ['munge', 'slurm', 'slurm-slurmd', 'slurm-slurmctld']
         state: present
+        enablerepo: "{{ (ansible_distribution_major_version | int == 9) | ternary('crb', 'powertools') }}"
       when: ansible_os_family == 'RedHat'
 
     - name: Install Slurm/MUNGE packages (Debian family)

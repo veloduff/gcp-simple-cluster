@@ -93,6 +93,32 @@ while read -r name ip status; do
   fi
 done <<< "$instances"
 
+echo "Waiting for SSH and hpcuser setup to be ready on all nodes..."
+for name in $master_nodes $compute_nodes; do
+  echo "Checking SSH connectivity to $name..."
+  ssh_ready=false
+  for ssh_attempt in $(seq 1 30); do
+    if ssh -i .cluster-keys/id_rsa_cluster \
+        -o ProxyCommand="gcloud compute start-iap-tunnel $name 22 --listen-on-stdin --project=$PROJECT_ID --zone=$ZONE --quiet" \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=5 \
+        hpcuser@$name "echo ready" >/dev/null 2>&1; then
+      echo "  $name is ready!"
+      ssh_ready=true
+      break
+    fi
+    echo "  $name not ready yet (attempt $ssh_attempt/30)..."
+    sleep 5
+  done
+
+  if [ "$ssh_ready" = false ]; then
+    echo "ERROR: Timeout waiting for SSH on node $name. The startup script might have failed, or IAP tunnel is blocked." >&2
+    exit 1
+  fi
+done
+
+
 mkdir -p ansible
 
 cat << EOF > ansible/inventory.ini
@@ -110,7 +136,7 @@ compute
 ansible_user=hpcuser
 ansible_ssh_private_key_file=../.cluster-keys/id_rsa_cluster
 ansible_python_interpreter=/usr/bin/python3.9
-ansible_ssh_common_args='-o ProxyCommand="gcloud compute start-iap-tunnel %h %p --listen-on-stdin --project=${PROJECT_ID} --zone=${ZONE} --quiet" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+ansible_ssh_common_args='-o ProxyCommand="gcloud compute start-iap-tunnel %h %p --listen-on-stdin --project=${PROJECT_ID} --zone=${ZONE} --quiet" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ConnectionAttempts=3'
 EOF
 
 echo "--------------------------------------------------"

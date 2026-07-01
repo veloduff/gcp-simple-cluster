@@ -20,6 +20,29 @@ show_usage() {
   echo "  help          - Show this help message"
 }
 
+# Helper to check if a command exists
+check_cmd() {
+  local cmd="$1"
+  local help_msg="$2"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "ERROR: Required command '$cmd' is not installed." >&2
+    echo "       $help_msg" >&2
+    exit 1
+  fi
+}
+
+verify_terraform() {
+  check_cmd "terraform" "Please install Terraform: https://developer.hashicorp.com/terraform/downloads"
+}
+
+verify_gcloud() {
+  check_cmd "gcloud" "Please install the Google Cloud SDK: https://cloud.google.com/sdk/docs/install"
+}
+
+verify_ansible() {
+  check_cmd "ansible-playbook" "Please install Ansible on your Mac: pip install ansible  or  brew install ansible"
+}
+
 # 1. Verify GCP Authentication Status
 verify_auth() {
   echo "Verifying Google Cloud credentials..."
@@ -164,10 +187,14 @@ shift
 
 case "$COMMAND" in
   check-config)
+    verify_terraform
     show_config
     ;;
   
   launch)
+    verify_terraform
+    verify_gcloud
+    verify_ansible
     verify_auth
     show_config
     echo ""
@@ -186,10 +213,19 @@ case "$COMMAND" in
     echo "Configuring software via Ansible..."
     echo "---------------------------------------------"
     # Launches configuration script interactively
-    ./configure_cluster.sh --all
+    ./configure_cluster.sh
+
+    echo ""
+    echo "------------------------------------------------------------"
+    echo "Cluster deployment and configuration complete!"
+    echo "To log into the master node, run:"
+    echo "  gcloud compute ssh ${CLUSTER_NAME}-master --project=${PROJECT_ID} --zone=${ZONE}"
+    echo "------------------------------------------------------------"
     ;;
 
   configure)
+    verify_gcloud
+    verify_ansible
     verify_auth
     echo "Re-running configuration playbook..."
     echo "---------------------------------------------"
@@ -197,6 +233,8 @@ case "$COMMAND" in
     ;;
 
   destroy)
+    verify_terraform
+    verify_gcloud
     verify_auth
     sync_tfvars
     echo "Starting Cluster Teardown..."
