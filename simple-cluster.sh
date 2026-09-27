@@ -17,6 +17,7 @@ show_usage() {
   echo "  configure     - Re-run configuration playbook (Ansible) on the active cluster"
   echo "  destroy       - Tear down and delete all cluster resources in GCP"
   echo "                  Options: -v, --verbose  (Shows raw Terraform plan and prompts for confirmation)"
+  echo "  status        - Check if there is an active cluster running in GCP"
   echo "  help          - Show this help message"
 }
 
@@ -131,9 +132,10 @@ show_config() {
   COMPUTE_TYPE="undefined"
   CREATE_VPC="true"
   VPC_NAME="default"
+  USE_FILESTORE="false"
 
   # Query all values in a single terraform console invocation
-  MAP_EXPR="{project_id = var.project_id, region = var.region, zone = var.zone, cluster_name = var.cluster_name, compute_node_count = var.compute_node_count, master_machine_type = var.master_machine_type, compute_machine_type = var.compute_machine_type, create_network = var.create_network, vpc_name = var.vpc_name}"
+  MAP_EXPR="{project_id = var.project_id, region = var.region, zone = var.zone, cluster_name = var.cluster_name, compute_node_count = var.compute_node_count, master_machine_type = var.master_machine_type, compute_machine_type = var.compute_machine_type, create_network = var.create_network, vpc_name = var.vpc_name, use_filestore = var.use_filestore}"
   MAP_DATA=$(echo "$MAP_EXPR" | terraform console 2>/dev/null || echo "")
 
   if [ -n "$MAP_DATA" ]; then
@@ -152,6 +154,7 @@ show_config() {
           compute_machine_type) COMPUTE_TYPE="$val" ;;
           create_network) CREATE_VPC="$val" ;;
           vpc_name) VPC_NAME="$val" ;;
+          use_filestore) USE_FILESTORE="$val" ;;
         esac
       fi
     done <<< "$MAP_DATA"
@@ -173,7 +176,62 @@ show_config() {
   else
     echo "VPC Strategy:         Deploy into EXISTING VPC network ($VPC_NAME)"
   fi
+  if [ "$USE_FILESTORE" = "true" ]; then
+    echo "Shared Storage:       Google Cloud Filestore (BASIC_SSD)"
+  else
+    echo "Shared Storage:       Master Node NFS Server (Local SSD)"
+  fi
   echo "============================================="
+  
+  # Enforce scale limits
+  if [[ "$COMPUTE_NODES" =~ ^[0-9]+$ ]]; then
+    if [ "$COMPUTE_NODES" -ge 50 ]; then
+      echo "ERROR: Compute node count ($COMPUTE_NODES) exceeds the hard limit of 50." >&2
+      echo "       At this scale, GCP IAP tunnel rate limits will cause deployment failures." >&2
+      if [ "$USE_FILESTORE" = "false" ]; then
+        echo "       Additionally, you must use Filestore (set use_filestore = true in cluster.conf) at this scale." >&2
+      fi
+      echo "       Please reduce compute_node_count in cluster.conf to below 50." >&2
+      exit 1
+    elif [ "$COMPUTE_NODES" -ge 48 ]; then
+      echo "WARNING: Compute node count ($COMPUTE_NODES) is very close to the hard limit of 50." >&2
+      echo "         You are highly likely to experience SSH banner exchange timeouts or IAP throttling." >&2
+      if [ "$USE_FILESTORE" = "false" ]; then
+        echo "         At this scale, you should enable Filestore (set use_filestore = true in cluster.conf) to handle the storage load." >&2
+      fi
+    elif [ "$COMPUTE_NODES" -ge 32 ]; then
+      echo "WARNING: Compute node count ($COMPUTE_NODES) exceeds the recommended soft limit of 32." >&2
+      echo "         Deployment might succeed, but you may experience transient SSH connection retries." >&2
+      if [ "$USE_FILESTORE" = "false" ]; then
+        echo "         For optimal storage performance at this scale, you should enable Filestore (set use_filestore = true in cluster.conf)." >&2
+      fi
+    fi
+  fi
+}
+
+# 3. Check Cluster Status in GCP
+show_status() {
+  verify_gcloud
+  verify_auth
+  show_config
+  
+  echo ""
+  echo "Checking GCP for running cluster instances..."
+  echo "---------------------------------------------"
+  
+  local instances
+  instances=$(gcloud compute instances list \
+    --project="${PROJECT_ID}" \
+    --filter="name ~ '^${CLUSTER_NAME}-(master|node-.*)'" \
+    --format="table(name, zone, status, networkInterfaces[0].networkIP:label=INTERNAL_IP)" 2>/dev/null || true)
+    
+  if [ -z "$instances" ] || [ "$(echo "$instances" | wc -l)" -le 1 ]; then
+    echo "No active cluster instances found for '${CLUSTER_NAME}' in project '${PROJECT_ID}'."
+  else
+    echo "Active cluster instances found:"
+    echo "$instances"
+  fi
+  echo "---------------------------------------------"
 }
 
 # Parse command line argument
@@ -189,6 +247,10 @@ case "$COMMAND" in
   check-config)
     verify_terraform
     show_config
+    ;;
+
+  status)
+    show_status
     ;;
   
   launch)

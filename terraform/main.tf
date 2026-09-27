@@ -223,3 +223,21 @@ resource "google_compute_router_nat" "hpc_nat" {
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
+
+# 9. Google Cloud Filestore Instance for Shared NFS Storage
+resource "google_filestore_instance" "hpc_filestore" {
+  count    = (var.use_filestore && var.existing_filestore_ip == "") ? 1 : 0
+  name     = "${var.cluster_name}-filestore"
+  location = var.zone
+  tier     = "BASIC_SSD"
+
+  file_shares {
+    capacity_gb = 2560 # Minimum capacity for BASIC_SSD is 2.5 TiB (2560 GiB)
+    name        = "share1"
+  }
+
+  networks {
+    network = local.vpc_name
+    modes   = ["ADDRESS_MODE_IPV4"]
+  }
+}

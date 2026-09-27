@@ -47,7 +47,7 @@
         state: present
       when: ansible_os_family == 'Debian'
 
-- name: 4. Configure NFS Server on Master Node
+- name: 4. Configure NFS Server on Master Node (Only if not using Filestore)
   hosts: master
   become: true
   tags: [nfs]
@@ -61,29 +61,31 @@
         owner: hpcuser
         group: hpcuser
         mode: '0755'
+      when: not use_filestore | bool
 
     - name: Configure NFS Export
       ansible.builtin.template:
         src: exports.j2
         dest: /etc/exports
         mode: '0644'
+      when: not use_filestore | bool
 
     - name: Start and enable NFS services (RedHat family)
       ansible.builtin.systemd:
         name: nfs-server
         state: restarted
         enabled: true
-      when: ansible_os_family == 'RedHat'
+      when: (ansible_os_family == 'RedHat') and (not use_filestore | bool)
 
     - name: Start and enable NFS services (Debian family)
       ansible.builtin.systemd:
         name: nfs-kernel-server
         state: restarted
         enabled: true
-      when: ansible_os_family == 'Debian'
+      when: (ansible_os_family == 'Debian') and (not use_filestore | bool)
 
-- name: 5. Configure NFS Client on Compute Nodes
-  hosts: compute
+- name: 5. Configure NFS Client and Mount Shared Directory
+  hosts: all_nodes
   become: true
   tags: [nfs]
   vars:
@@ -96,14 +98,16 @@
         owner: hpcuser
         group: hpcuser
         mode: '0755'
+      when: (use_filestore | bool) or ('compute' in group_names)
 
-    - name: Mount NFS share from Master
+    - name: Mount Shared Directory
       ansible.posix.mount:
         path: "{{ shared_dir }}"
-        src: "{{ groups['master'][0] }}:{{ shared_dir }}"
+        src: "{{ (use_filestore | bool) | ternary(filestore_ip ~ ':/' ~ filestore_share, groups['master'][0] ~ ':' ~ shared_dir) }}"
         fstype: nfs
-        opts: defaults,timeo=14,intr
+        opts: "{{ (use_filestore | bool) | ternary('defaults,_netdev,timeo=14,intr', 'defaults,timeo=14,intr') }}"
         state: mounted
+      when: (use_filestore | bool) or ('compute' in group_names)
 
 - name: 6. Configure Slurm Packages and MUNGE Authentication
   hosts: all_nodes

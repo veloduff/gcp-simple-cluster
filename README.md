@@ -55,13 +55,21 @@ zone       = "your-gcp-zone"
 
 # Total compute nodes (excluding the master node)
 compute_node_count = 2
-master_machine_type = "n4-standard-4"
+master_machine_type = "c4d-standard-8-lssd"
 compute_machine_type = "c4-standard-8"
 
 # VPC Toggles: Set to false to deploy inside an existing VPC
 create_network = true
 vpc_name       = "default"
 subnet_name    = "default"
+
+# Shared Storage Options:
+# Set use_filestore = true to use Google Cloud Filestore instead of a Master-served NFS.
+use_filestore = false
+
+# Existing Filestore Settings (if you want to mount an already existing Filestore instance)
+existing_filestore_ip    = ""
+existing_filestore_share = "share1"
 ```
 
 ### 2. Verify settings and GCP Auth
@@ -70,11 +78,55 @@ From the root directory, check your configuration parameters and GCP authenticat
 ./simple-cluster.sh check-config
 ```
 
+> [!TIP]
+> **Headless GCP Authentication (No Browser)**:
+> If you are running on a remote environment (e.g. headless shell) and need to authenticate without launching a local browser window, run:
+> ```bash
+> gcloud auth login --no-launch-browser
+> gcloud auth application-default login --no-launch-browser
+> ```
+
 ### 3. Launch the Cluster
-Run the unified launch command. This will initialize and apply Terraform to deploy the VMs, and then automatically configure the shared NFS folders, build tools, and the Slurm workload scheduler:
+Run the unified launch command. This will initialize and apply Terraform to deploy the VMs, and then automatically configure the shared folders, build tools, and the Slurm workload scheduler:
 ```bash
 ./simple-cluster.sh launch
 ```
+
+### 4. Check Cluster Status
+You can check if there are active cluster instances running in GCP at any time:
+```bash
+./simple-cluster.sh status
+```
+
+---
+
+## Shared Storage Options
+
+This project supports three shared storage architectures out of the box:
+
+### Option A: Master-Served NFS (Default)
+*   **Configuration**: `use_filestore = false`
+*   **How it works**: The Master VM uses its local SSD to host a traditional NFS share (`/home/hpcuser/shared`), which is mounted by the compute nodes.
+*   **Best for**: Cost-effective testing, development, and clusters under 32 nodes.
+
+### Option B: Managed Google Cloud Filestore
+*   **Configuration**: `use_filestore = true`
+*   **How it works**: Terraform provisions a managed **Google Cloud Filestore (BASIC_SSD)** instance (2.5 TiB capacity, 1.2 GB/s throughput) and mounts it across all nodes (including the Master).
+*   **Best for**: Larger clusters (32+ nodes) or I/O-intensive workloads.
+
+### Option C: Existing Google Cloud Filestore
+*   **Configuration**: Provide `existing_filestore_ip` and `existing_filestore_share` in `cluster.conf`.
+*   **How it works**: Terraform skips creating a new Filestore instance and mounts your existing persistent Filestore share instead.
+
+---
+
+## Scaling Limits & Safeguards
+
+To ensure stable deployments over Google Cloud's IAP (Identity-Aware Proxy) tunnel, the script enforces the following scale limits on `compute_node_count`:
+
+*   **Soft Limit 1 (32 Nodes)**: Prints a warning recommending the use of **Google Cloud Filestore** instead of Master-served NFS for optimal storage performance.
+*   **Soft Limit 2 (48 Nodes)**: Prints a warning about potential SSH connection throttling or timeouts.
+*   **Hard Limit (50 Nodes)**: Blocks the deployment entirely to prevent incomplete states caused by IAP connection rate limits.
 
 ---
 

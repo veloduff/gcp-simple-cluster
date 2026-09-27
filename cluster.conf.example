@@ -21,3 +21,10 @@ cluster_name = "simple-hpc-cluster"
 create_network = true
 vpc_name       = "default"
 subnet_name    = "default"
+
+# Shared Storage Toggle: Set to true to use Google Cloud Filestore instead of Master NFS
+use_filestore = false
+
+# Existing Filestore Settings (if you want to mount an already existing Filestore instance)
+existing_filestore_ip    = ""
+existing_filestore_share = "share1"

@@ -68,3 +68,21 @@ variable "image_family" {
   type        = string
   default     = "rocky-linux-8-optimized-gcp"
 }
+
+variable "use_filestore" {
+  description = "Whether to use Google Cloud Filestore for shared storage instead of a Master-served NFS."
+  type        = bool
+  default     = false
+}
+
+variable "existing_filestore_ip" {
+  description = "IP address of an existing Filestore instance. If provided, Terraform will not create a new Filestore."
+  type        = string
+  default     = ""
+}
+
+variable "existing_filestore_share" {
+  description = "Share name of the existing Filestore instance."
+  type        = string
+  default     = "share1"
+}

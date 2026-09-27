@@ -25,6 +25,13 @@ PROJECT_ID=$(terraform output -raw project_id)
 ZONE=$(terraform output -raw zone)
 CLUSTER_NAME=$(terraform output -raw cluster_name)
 CLUSTER_SIZE=$(terraform output -raw cluster_size)
+FILESTORE_IP=$(terraform output -raw filestore_ip 2>/dev/null || echo "")
+FILESTORE_SHARE=$(terraform output -raw filestore_share 2>/dev/null || echo "share1")
+if [ -n "$FILESTORE_IP" ]; then
+  USE_FILESTORE="true"
+else
+  USE_FILESTORE="false"
+fi
 
 cd "$SCRIPT_DIR"
 
@@ -93,10 +100,8 @@ while read -r name ip status; do
   fi
 done <<< "$instances"
 
-echo "Waiting for SSH and hpcuser setup to be ready on all nodes..."
-for name in $master_nodes $compute_nodes; do
-  echo "Checking SSH connectivity to $name..."
-  ssh_ready=false
+check_node_ssh() {
+  local name="$1"
   for ssh_attempt in $(seq 1 30); do
     if ssh -i .cluster-keys/id_rsa_cluster \
         -o ProxyCommand="gcloud compute start-iap-tunnel $name 22 --listen-on-stdin --project=$PROJECT_ID --zone=$ZONE --quiet" \
@@ -105,18 +110,33 @@ for name in $master_nodes $compute_nodes; do
         -o ConnectTimeout=5 \
         hpcuser@$name "echo ready" >/dev/null 2>&1; then
       echo "  $name is ready!"
-      ssh_ready=true
-      break
+      return 0
     fi
-    echo "  $name not ready yet (attempt $ssh_attempt/30)..."
     sleep 5
   done
+  echo "ERROR: Timeout waiting for SSH on node $name. The startup script might have failed, or IAP tunnel is blocked." >&2
+  return 1
+}
 
-  if [ "$ssh_ready" = false ]; then
-    echo "ERROR: Timeout waiting for SSH on node $name. The startup script might have failed, or IAP tunnel is blocked." >&2
-    exit 1
+echo "Waiting for SSH and hpcuser setup to be ready on all nodes (parallel check)..."
+pids=()
+for name in $master_nodes $compute_nodes; do
+  check_node_ssh "$name" &
+  pids+=($!)
+done
+
+# Wait for all background jobs and collect exit codes
+failed=0
+for pid in "${pids[@]}"; do
+  if ! wait "$pid"; then
+    failed=$((failed + 1))
   fi
 done
+
+if [ "$failed" -gt 0 ]; then
+  echo "ERROR: $failed node(s) failed the SSH readiness check. Exiting." >&2
+  exit 1
+fi
 
 
 mkdir -p ansible
@@ -137,6 +157,9 @@ ansible_user=hpcuser
 ansible_ssh_private_key_file=../.cluster-keys/id_rsa_cluster
 ansible_python_interpreter=/usr/bin/python3.9
 ansible_ssh_common_args='-o ProxyCommand="gcloud compute start-iap-tunnel %h %p --listen-on-stdin --project=${PROJECT_ID} --zone=${ZONE} --quiet" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ConnectionAttempts=3'
+use_filestore=${USE_FILESTORE}
+filestore_ip=${FILESTORE_IP}
+filestore_share=${FILESTORE_SHARE}
 EOF
 
 echo "--------------------------------------------------"

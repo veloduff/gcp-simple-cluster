@@ -42,3 +42,13 @@ output "cluster_size" {
   description = "Total number of nodes (master + compute nodes)."
   value       = var.compute_node_count + 1
 }
+
+output "filestore_ip" {
+  description = "The internal IP address of the Filestore instance (new or existing)."
+  value       = var.existing_filestore_ip != "" ? var.existing_filestore_ip : (var.use_filestore ? google_filestore_instance.hpc_filestore[0].networks[0].ip_addresses[0] : "")
+}
+
+output "filestore_share" {
+  description = "The share name of the Filestore instance (new or existing)."
+  value       = var.existing_filestore_ip != "" ? var.existing_filestore_share : (var.use_filestore ? google_filestore_instance.hpc_filestore[0].file_shares[0].name : "")
+}

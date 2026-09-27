@@ -4,7 +4,8 @@
 set -euo pipefail
 
 # Ensure we are in the script's directory
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # Help message
 show_usage() {
